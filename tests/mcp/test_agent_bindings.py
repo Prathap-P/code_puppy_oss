@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -360,6 +361,65 @@ def _fake_managed(name: str):
     fake.is_quarantined.return_value = False
     fake.get_pydantic_server.return_value = MagicMock(name=f"pydantic-{name}")
     return fake
+
+
+class TestJsonDeclaredBindingsLogging:
+    """_load_json_declared_bindings must warn (not stay silent) on failure.
+
+    Covers the three sibling except blocks: import failure, load_agent
+    raising, and get_declared_mcp_bindings raising. Each must emit a
+    logger.warning record while still returning an empty dict so loading
+    continues without raising.
+    """
+
+    def test_load_agent_raises_logs_warning(self, tmp_bindings, caplog):
+        with (
+            patch(
+                "code_puppy.agents.agent_manager.load_agent",
+                side_effect=RuntimeError("boom"),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = ab._load_json_declared_bindings("clone-1")
+
+        assert result == {}
+        assert any(
+            record.levelname == "WARNING" and ab.BINDINGS_FILE in record.message
+            for record in caplog.records
+        )
+
+    def test_get_declared_bindings_raises_logs_warning(self, tmp_bindings, caplog):
+        from code_puppy.agents.json_agent import JSONAgent
+
+        bad_agent = MagicMock(spec=JSONAgent)
+        bad_agent.get_declared_mcp_bindings.side_effect = RuntimeError("kaboom")
+        with (
+            patch(
+                "code_puppy.agents.agent_manager.load_agent", return_value=bad_agent
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = ab._load_json_declared_bindings("clone-1")
+
+        assert result == {}
+        assert any(
+            record.levelname == "WARNING" and ab.BINDINGS_FILE in record.message
+            for record in caplog.records
+        )
+
+    def test_import_failure_logs_warning(self, tmp_bindings, caplog, monkeypatch):
+        # Force the lazy `from code_puppy.agents.agent_manager import load_agent`
+        # inside _load_json_declared_bindings to raise, exercising the
+        # outermost (import-time) except block specifically.
+        monkeypatch.setitem(sys.modules, "code_puppy.agents.agent_manager", None)
+        with caplog.at_level("WARNING"):
+            result = ab._load_json_declared_bindings("clone-1")
+
+        assert result == {}
+        assert any(
+            record.levelname == "WARNING" and ab.BINDINGS_FILE in record.message
+            for record in caplog.records
+        )
 
 
 class TestJsonDeclaredBindingsMerge:
