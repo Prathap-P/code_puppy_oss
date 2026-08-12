@@ -6,8 +6,11 @@ and timeout/error scenarios.
 """
 
 import asyncio
+import logging
 import os
 import tempfile
+import threading
+import time
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -111,6 +114,26 @@ class TestStderrFileCapture:
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+    def test_monitor_file_read_failure_logs_debug(self, caplog):
+        """Test that a file-read failure during monitoring emits a debug log record."""
+        nonexistent_path = os.path.join(
+            tempfile.gettempdir(), f"nonexistent-{uuid.uuid4()}.log"
+        )
+        capture = StderrFileCapture("test-server")
+        capture.log_path = nonexistent_path
+
+        logger_name = "code_puppy.mcp_.blocking_startup"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            monitor_thread = threading.Thread(target=capture._monitor_file)
+            monitor_thread.daemon = True
+            monitor_thread.start()
+            time.sleep(0.25)
+            capture.stop_monitoring.set()
+            monitor_thread.join(timeout=2)
+
+        debug_records = [r for r in caplog.records if r.levelname == "DEBUG"]
+        assert any("test-server" in r.message for r in debug_records)
 
     @patch("code_puppy.mcp_.blocking_startup.rotate_log_if_needed")
     @patch("code_puppy.mcp_.blocking_startup.get_log_file_path")
