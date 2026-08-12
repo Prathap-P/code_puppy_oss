@@ -18,6 +18,7 @@ preserved verbatim:
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import signal
 import threading
@@ -100,6 +101,8 @@ from code_puppy.config import (
 from code_puppy.keymap import sigint_fallback_cancels
 from code_puppy.messaging import emit_error, emit_info, emit_warning
 from code_puppy.tools.command_runner import is_awaiting_user_input
+
+logger = logging.getLogger(__name__)
 
 # ---- Streaming retry helpers ------------------------------------------------
 
@@ -865,11 +868,7 @@ async def _run_with_mcp_impl(
                 "via [cyan]/agents → B[/cyan].",
                 group_id=group_id,
             )
-            import logging as _logging
-
-            _logging.getLogger(__name__).debug(
-                "McpError during agent run: %s", mcp_error
-            )
+            logger.debug("McpError during agent run: %s", mcp_error)
         except* asyncio.CancelledError:
             # Leading newline: a mid-stream cancel aborts the drain tasks
             # (event_stream_handler) before the "final newline after
@@ -894,11 +893,7 @@ async def _run_with_mcp_impl(
             scope_noise = [e for e in unexpected if _is_cancel_scope_corruption(e)]
             unexpected = [e for e in unexpected if e not in scope_noise]
             if scope_noise:
-                import logging as _logging
-
-                _logging.getLogger(__name__).debug(
-                    "Suppressed cross-task cancel-scope error(s): %s", scope_noise
-                )
+                logger.debug("Suppressed cross-task cancel-scope error(s): %s", scope_noise)
                 emit_warning(
                     "An MCP server connection died during this run (its async "
                     "teardown crossed task boundaries). The response above is "
@@ -906,6 +901,7 @@ async def _run_with_mcp_impl(
                     "Check [cyan]/mcp status[/cyan] and restart the server if needed."
                 )
             for exc in unexpected:
+                logger.error("Unexpected exception during agent run: %s", exc, exc_info=exc)
                 emit_exception_diagnostics(exc, group_id=group_id)
             # Re-raise so the outer handler in run_with_mcp can propagate
             # (or re-raise) the exception to the caller. Silently returning
