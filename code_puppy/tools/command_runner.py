@@ -1,5 +1,6 @@
 import asyncio
 import ctypes
+import logging
 import os
 import select
 import signal
@@ -37,6 +38,8 @@ from code_puppy.tools.shell_backgrounding import (
     request_background_all,
 )
 from code_puppy.tools.subagent_context import is_subagent
+
+logger = logging.getLogger(__name__)
 
 # Maximum line length for shell command output to prevent massive token usage
 # This helps avoid exceeding model context limits when commands produce very long lines
@@ -193,8 +196,10 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
                 try:
                     proc.kill()
                     time.sleep(0.3)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "proc.kill() fallback failed for pid=%s: %s", proc.pid, e
+                    )
             return
 
         # POSIX
@@ -218,13 +223,18 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
             if proc.poll() is None:
                 os.killpg(pgid, signal.SIGKILL)
                 time.sleep(0.5)
-        except (OSError, ProcessLookupError):
+        except (OSError, ProcessLookupError) as group_exc:
+            logger.warning(
+                "killpg fallback triggered for pid=%s: %s", pid, group_exc
+            )
             # Fall back to direct kill of the process
             try:
                 if proc.poll() is None:
                     proc.kill()
-            except (OSError, ProcessLookupError):
-                pass
+            except (OSError, ProcessLookupError) as kill_exc:
+                logger.warning(
+                    "proc.kill() fallback failed for pid=%s: %s", pid, kill_exc
+                )
 
         if proc.poll() is None:
             # Last ditch attempt; may be unkillable zombie
@@ -234,9 +244,14 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
                     time.sleep(0.2)
                     if proc.poll() is not None:
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "Last-ditch os.kill(SIGKILL) fallback failed for pid=%s: %s",
+                    proc.pid,
+                    e,
+                )
     except Exception as e:
+        logger.warning("Kill process error for pid=%s: %s", getattr(proc, "pid", "?"), e)
         emit_error(f"Kill process error: {e}")
 
 
