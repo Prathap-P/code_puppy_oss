@@ -262,6 +262,23 @@ class TestManagedMCPServerInit:
         assert server._error_message == "Connection failed"
         assert server._pydantic_server is None
 
+    def test_init_logs_error_on_create_server_failure(self, caplog):
+        config = ServerConfig(
+            id="test-id",
+            name="test-server",
+            type="sse",
+            config={"url": "http://localhost:8080"},
+        )
+        with (
+            patch(SSE, side_effect=Exception("Connection failed")),
+            caplog.at_level("ERROR", logger="code_puppy.mcp_.managed_server"),
+        ):
+            ManagedMCPServer(config)
+        assert any(
+            "test-server" in record.message and "Connection failed" in record.message
+            for record in caplog.records
+        )
+
 
 class TestGetPydanticServer:
     def test_raises_when_server_is_none(self):

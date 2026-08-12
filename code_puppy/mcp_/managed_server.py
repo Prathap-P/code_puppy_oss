@@ -5,6 +5,7 @@ This module provides a managed wrapper around pydantic-ai MCP server classes
 that adds management capabilities while maintaining 100% compatibility.
 """
 
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from pydantic_ai.mcp import (
 from code_puppy.http_utils import create_async_client, get_cert_bundle_path
 from code_puppy.mcp_.blocking_startup import BlockingMCPServerStdio
 from code_puppy.mcp_.tool_arg_coercion import coerce_tool_args
+
+logger = logging.getLogger(__name__)
 
 
 def _expand_env_vars(value: Any) -> Any:
@@ -139,7 +142,8 @@ async def _input_schema_for_tool(
         return None
     try:
         tools = await list_tools()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to list tools while resolving schema for '{name}': {e}")
         return None
     for tool in tools:
         if getattr(tool, "name", None) == name:
@@ -217,6 +221,7 @@ class ManagedMCPServer:
             # Always start as STOPPED - servers must be explicitly started
             self._state = ServerState.STOPPED
         except Exception as e:
+            logger.error(f"Failed to create MCP server '{self.config.name}': {e}")
             self._state = ServerState.ERROR
             self._error_message = str(e)
 
@@ -459,7 +464,10 @@ class ManagedMCPServer:
             try:
                 await self._pydantic_server.wait_until_ready(timeout)
                 return True
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    f"Server '{self.config.name}' not ready within timeout: {e}"
+                )
                 return False
         # Non-stdio servers are considered ready immediately
         return True
