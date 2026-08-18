@@ -8,6 +8,7 @@ This module provides MCP servers that:
 """
 
 import asyncio
+import logging
 import os
 import threading
 import uuid
@@ -20,6 +21,8 @@ from pydantic_ai.mcp import MCPServerStdio
 
 from code_puppy.mcp_.mcp_logs import get_log_file_path, rotate_log_if_needed, write_log
 from code_puppy.messaging import emit_info
+
+logger = logging.getLogger(__name__)
 
 
 class StderrFileCapture:
@@ -64,7 +67,10 @@ class StderrFileCapture:
             self.monitor_thread = threading.Thread(target=self._monitor_file)
             self.monitor_thread.daemon = True
             self.monitor_thread.start()
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "StderrFileCapture.start failed for server %s: %s", self.server_name, e
+            )
             if self.log_file is not None:
                 self.log_file.close()
                 self.log_file = None
@@ -103,16 +109,25 @@ class StderrFileCapture:
                                             message_group=self.message_group,
                                         )
 
-                except Exception:
-                    pass  # File might not exist yet or be deleted
+                except Exception as e:
+                    logger.debug(
+                        "StderrFileCapture._monitor_file read failed for server %s: %s",
+                        self.server_name,
+                        e,
+                    )
+                    # File might not exist yet or be deleted
 
                 self.stop_monitoring.wait(0.1)  # Check every 100ms
         finally:
             if self.log_file is not None:
                 try:
                     self.log_file.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "StderrFileCapture._monitor_file close failed for server %s: %s",
+                        self.server_name,
+                        e,
+                    )
                 self.log_file = None
 
     def stop(self):
@@ -125,8 +140,12 @@ class StderrFileCapture:
             try:
                 self.log_file.flush()
                 self.log_file.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "StderrFileCapture.stop failed closing log file for server %s: %s",
+                    self.server_name,
+                    e,
+                )
 
         # Write shutdown marker
         write_log(self.server_name, "--- Server stopped ---", "INFO")
@@ -145,8 +164,12 @@ class StderrFileCapture:
                                     f"MCP {self.server_name}: {line}",
                                     message_group=self.message_group,
                                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "StderrFileCapture.stop failed reading remaining content for server %s: %s",
+                    self.server_name,
+                    e,
+                )
 
         # Note: We do NOT delete the log file - it's persistent now!
 

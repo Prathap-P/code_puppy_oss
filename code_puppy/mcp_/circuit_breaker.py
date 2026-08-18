@@ -129,7 +129,11 @@ class CircuitBreaker:
             )
             await self._on_success(checked_state=checked_state)
             return result
-        except Exception:
+        except Exception as exc:
+            func_name = getattr(func, "__name__", repr(func))
+            logger.warning(
+                f"Circuit breaker call to '{func_name}' failed: {exc!r}"
+            )
             await self._on_failure(checked_state=checked_state)
             raise
 

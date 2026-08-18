@@ -1,6 +1,7 @@
 # agent_tools.py
 import hashlib
 import json
+import logging
 import pickle
 import re
 from datetime import datetime
@@ -23,6 +24,8 @@ from code_puppy.messaging import (
     set_session_context,
 )
 from code_puppy.tools.common import atomic_write_text, generate_group_id
+
+logger = logging.getLogger(__name__)
 
 
 def _generate_session_hash_suffix() -> str:
@@ -152,8 +155,11 @@ def _save_session_history(
             metadata["message_count"] = len(message_history)
             metadata["last_updated"] = datetime.now().isoformat()
             atomic_write_text(str(txt_path), json.dumps(metadata, indent=2))
-        except Exception:
-            pass  # If we can't update metadata, no big deal
+        except Exception as e:
+            logger.warning(
+                "Failed to update session metadata at %s: %s", txt_path, e
+            )
+            # If we can't update metadata, no big deal
 
 
 def _load_session_history(session_id: str) -> List[ModelMessage]:
@@ -180,7 +186,10 @@ def _load_session_history(session_id: str) -> List[ModelMessage]:
     try:
         with open(pkl_path, "rb") as f:
             return pickle.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "Failed to load session history from %s: %s", pkl_path, e
+        )
         # If pickle is corrupted or incompatible, return empty history
         return []
 
