@@ -205,15 +205,17 @@ def make_model_settings(
             models_config = ModelFactory.load_config()
             model_config = models_config.get(model_name, {})
             context_length = model_config.get("context_length", 128000)
-        except Exception:
+        except Exception as exc:
             # Fallback if config loading fails (e.g., in CI environments)
+            logger.debug(f"Failed to load model config for '{model_name}', falling back to defaults: {exc}")
             context_length = 128000
         # min 2048, 15% of context, max 65536
         max_tokens = max(2048, min(int(0.15 * context_length), 65536))
     elif not model_config:
         try:
             model_config = ModelFactory.load_config().get(model_name, {})
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Failed to load model config for '{model_name}': {exc}")
             model_config = {}
 
     model_settings_dict["max_tokens"] = max_tokens
@@ -528,7 +530,8 @@ def get_custom_config(model_config):
         if isinstance(timeout, str):
             try:
                 timeout = float(timeout)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug(f"Custom endpoint timeout value '{timeout}' could not be parsed as a float: {exc}")
                 raise ValueError("Custom endpoint timeout must be a number")
         if not isinstance(timeout, (int, float)):
             raise ValueError("Custom endpoint timeout must be a number")
@@ -587,10 +590,10 @@ class ModelFactory:
                         )
 
                         extra_config = load_claude_models_filtered()
-                    except ImportError:
+                    except ImportError as exc:
                         # Plugin not available, fall back to standard JSON loading
-                        logging.getLogger(__name__).debug(
-                            f"claude_code_oauth plugin not available, loading {label} as plain JSON"
+                        logger.debug(
+                            f"claude_code_oauth plugin not available ({exc}), loading {label} as plain JSON"
                         )
                         with open(source_path, "r") as f:
                             extra_config = json.load(f)
