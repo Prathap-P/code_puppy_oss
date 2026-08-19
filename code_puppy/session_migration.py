@@ -24,10 +24,13 @@ sentinel is touched atomically.
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 import tempfile
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _SENTINEL_FILENAME = ".contexts_sweep_done"
 
@@ -70,8 +73,8 @@ def _atomic_touch(path: pathlib.Path) -> None:
         # Best-effort cleanup of the tempfile if replace failed.
         try:
             os.unlink(tmp_name)
-        except OSError:
-            pass
+        except OSError as cleanup_exc:
+            logger.debug("Failed to unlink stale sentinel tempfile %s: %r", tmp_name, cleanup_exc)
         raise
 
 
@@ -167,6 +170,7 @@ def sweep_contexts_to_autosaves() -> None:
                 ok, reason = _move_pair(entry, autosave_dir)
             except Exception as exc:
                 failures += 1
+                logger.warning("Failed to sweep context entry %s into autosaves: %r", entry, exc)
                 _log_orphan_sidecar(entry, exc)
                 continue
 
