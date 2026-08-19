@@ -96,7 +96,8 @@ def _load_json_declared_bindings(agent_name: str) -> Dict[str, Dict[str, Any]]:
     try:
         from code_puppy.agents.agent_manager import load_agent
         from code_puppy.agents.json_agent import JSONAgent
-    except Exception:  # pragma: no cover - defensive import
+    except Exception as exc:  # pragma: no cover - defensive import
+        logger.debug("Failed to import agent layer for MCP bindings lookup: %s", exc)
         return {}
 
     try:
@@ -109,7 +110,8 @@ def _load_json_declared_bindings(agent_name: str) -> Dict[str, Dict[str, Any]]:
 
     try:
         return agent.get_declared_mcp_bindings()
-    except Exception:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Failed to get declared MCP bindings for %s: %s", agent_name, exc)
         return {}
 
 
