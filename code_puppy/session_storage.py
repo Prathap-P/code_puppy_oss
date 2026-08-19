@@ -9,10 +9,13 @@ is better than complex, nested side effects are worse than deliberate helpers.
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_loads(data: bytes) -> Any:
@@ -162,7 +165,8 @@ def cleanup_sessions(base_dir: Path, max_sessions: int) -> List[str]:
             pickle_path.unlink(missing_ok=True)
             metadata_path.unlink(missing_ok=True)
             removed_sessions.append(pickle_path.stem)
-        except OSError:
+        except OSError as exc:
+            logger.warning("Failed to remove stale session '%s': %s", pickle_path.stem, exc)
             continue
 
     return removed_sessions
@@ -199,7 +203,8 @@ async def restore_autosave_interactively(base_dir: Path) -> None:
                 data = json.load(meta_file)
             timestamp = data.get("timestamp")
             message_count = data.get("message_count")
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to read autosave metadata for '%s': %s", name, exc)
             timestamp = None
             message_count = None
         entries.append((name, timestamp, message_count))
@@ -306,9 +311,11 @@ async def restore_autosave_interactively(base_dir: Path) -> None:
     try:
         history = load_session(chosen_name, base_dir)
     except FileNotFoundError:
+        logger.warning("Autosave '%s' could not be found", chosen_name)
         emit_warning(f"Autosave '{chosen_name}' could not be found")
         return
     except Exception as exc:
+        logger.warning("Failed to load autosave '%s': %s", chosen_name, exc)
         emit_warning(f"Failed to load autosave '{chosen_name}': {exc}")
         return
 
@@ -336,5 +343,6 @@ async def restore_autosave_interactively(base_dir: Path) -> None:
         from code_puppy.command_line.autosave_menu import display_resumed_history
 
         display_resumed_history(history)
-    except Exception:
-        pass  # Don't fail if display doesn't work in non-TTY environment
+    except Exception as exc:
+        # Don't fail if display doesn't work in non-TTY environment
+        logger.debug("Failed to display resumed history for '%s': %s", chosen_name, exc)
