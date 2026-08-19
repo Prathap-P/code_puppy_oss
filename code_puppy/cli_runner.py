@@ -10,6 +10,7 @@ apply_all_patches()
 
 import argparse
 import asyncio
+import logging
 import os
 import signal
 import sys
@@ -50,6 +51,8 @@ from code_puppy.terminal_utils import (
     reset_windows_terminal_full,
 )
 from code_puppy.version_checker import default_version_mismatch_behavior
+
+logger = logging.getLogger(__name__)
 
 plugins.load_plugin_callbacks()
 
@@ -399,6 +402,7 @@ async def main():
         sweep_contexts_to_autosaves()
     except Exception:
         # Sweep failure must never block startup -- it logs internally.
+        logger.debug("sweep_contexts_to_autosaves failed during startup", exc_info=True)
         pass
 
     await callbacks.on_startup()
@@ -521,6 +525,7 @@ async def main():
 
             stop_persistent_ui()
         except Exception:
+            logger.debug("stop_persistent_ui failed during teardown", exc_info=True)
             pass
         if message_renderer:
             message_renderer.stop()
@@ -531,6 +536,7 @@ async def main():
         try:
             await callbacks.on_session_end()
         except Exception:
+            logger.warning("callbacks.on_session_end failed during teardown", exc_info=True)
             pass
         await callbacks.on_shutdown()
 
@@ -559,6 +565,7 @@ def _use_persistent_prompt() -> bool:
         if str(get_value("classic_prompt") or "").strip().lower() in truthy:
             return False
     except Exception:
+        logger.debug("get_value('classic_prompt') failed; ignoring", exc_info=True)
         pass
     try:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -574,7 +581,9 @@ def _use_persistent_prompt() -> bool:
         if not ensure_windows_vt_processing():
             return False
     except Exception:
-        pass  # the gate itself must never kill the persistent UI
+        # the gate itself must never kill the persistent UI
+        logger.debug("ensure_windows_vt_processing failed; falling back", exc_info=True)
+        pass
     return True
 
 
