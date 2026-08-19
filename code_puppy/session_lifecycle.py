@@ -18,6 +18,7 @@ gives future session hooks (``on_session_create`` and friends) an obvious home.
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,8 @@ from code_puppy.session_storage import SessionMetadata, save_session
 
 if TYPE_CHECKING:
     from code_puppy.agents.base_agent import BaseAgent
+
+logger = logging.getLogger(__name__)
 
 # Write-side validator. Read-side path resolution stays permissive so users
 # can keep passing absolute paths to existing ``.pkl`` files -- the lazy-create
@@ -100,6 +103,9 @@ def persist_named_session(
     Returns the ``SessionMetadata`` produced by ``save_session`` so callers can
     surface their own UX as well.
     """
+    logger.debug(
+        "persist_named_session: session_name=%r auto_saved=%r", session_name, auto_saved
+    )
     metadata = save_session(
         history=agent.get_message_history(),
         session_name=session_name,
@@ -314,6 +320,7 @@ def fire_post_autosave_callback(metadata: SessionMetadata) -> None:
                 callbacks._trigger_callbacks_sync, "post_autosave", metadata
             )
             future.result(timeout=_POST_AUTOSAVE_TIMEOUT_S)
-    except Exception:
-        # Hook is decorative; never block the save path on it.
-        pass
+    except Exception as exc:
+        # Hook is decorative; never block the save path on it, but log for
+        # diagnostic purposes so a misbehaving plugin can be traced later.
+        logger.warning("post_autosave hook failed: %s", exc, exc_info=True)
