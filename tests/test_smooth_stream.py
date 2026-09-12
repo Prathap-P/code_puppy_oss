@@ -9,6 +9,7 @@ from rich.console import Console
 from code_puppy.agents.smooth_stream import (
     SmoothTermflowWriter,
     ThinkingStreamSmoother,
+    WordSafeChunker,
     _split_by_visible,
     make_smooth_termflow_writer,
     make_thinking_smoother,
@@ -52,6 +53,44 @@ async def test_emits_in_multiple_smooth_chunks():
     await sm.close()
     # Should be split into several ticks, not dumped in one go.
     assert len(writes) > 3
+
+
+@pytest.mark.asyncio
+async def test_word_never_split_across_smooth_chunks():
+    """Regression: a word can't be torn apart across two smoothed prints."""
+    console, _ = _plain_console()
+    writes: list[str] = []
+    console.print = lambda s, end="": writes.append(str(s))  # type: ignore[assignment]
+    sm = ThinkingStreamSmoother(
+        console, tick_interval=0.002, catch_up_seconds=0.02, min_chars_per_tick=2
+    )
+    sm.start()
+    text = "I will use git checkout to restore the four files explicitly"
+    for i in range(0, len(text), 3):  # bursty feed, like real LLM deltas
+        sm.feed(text[i : i + 3])
+    await sm.close()
+    # Each write is markup-wrapped ("[dim]...[/dim]"); unwrap before checking.
+    unwrapped = [w.removeprefix("[dim]").removesuffix("[/dim]") for w in writes]
+    assert "".join(unwrapped) == text
+    for w in unwrapped[:-1]:
+        assert w[-1].isspace(), unwrapped
+
+
+def test_word_safe_chunker():
+    """Core WordSafeChunker behavior: hold back, pathological run, discard."""
+    c = WordSafeChunker()
+    assert c.push("hello wor") == "hello "
+    assert c.push("ld more") == "world "
+    assert c.flush() == "more"
+
+    c = WordSafeChunker()
+    out = "".join(c.push(ch) for ch in "a" * 100) + c.flush()
+    assert out == "a" * 100  # no whitespace at all must still flush eventually
+
+    c = WordSafeChunker()
+    c.push("partial")
+    c.discard()
+    assert c.flush() == ""
 
 
 @pytest.mark.asyncio

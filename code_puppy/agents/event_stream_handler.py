@@ -22,6 +22,7 @@ from rich.text import Text
 from code_puppy.agents.smooth_stream import (
     SmoothTermflowWriter,
     ThinkingStreamSmoother,
+    WordSafeChunker,
     make_smooth_termflow_writer,
     make_thinking_smoother,
 )
@@ -236,6 +237,8 @@ async def event_stream_handler(
     # or ``thinking_direct`` when smoothing is off (print deltas immediately).
     thinking_smoothers: dict[int, ThinkingStreamSmoother] = {}
     thinking_direct: set[int] = set()
+    # Word-safe buffer for the direct (non-smoothed) print path.
+    thinking_direct_chunkers: dict[int, WordSafeChunker] = {}
     thinking_stream_id = object()
 
     def _filter_thinking(index: int, text: str, *, final: bool = False) -> str:
@@ -265,7 +268,10 @@ async def event_stream_handler(
         if smoother is not None:
             smoother.feed(text)
         else:
-            console.print(f"[dim]{escape(text)}[/dim]", end="")
+            chunker = thinking_direct_chunkers.setdefault(index, WordSafeChunker())
+            safe_text = chunker.push(text)
+            if safe_text:
+                console.print(f"[dim]{escape(safe_text)}[/dim]", end="")
 
     async def _finish_text_part(index: int) -> None:
         """Flush one text part, including streams missing ``PartEndEvent``."""
@@ -324,6 +330,7 @@ async def event_stream_handler(
             # abort means the user explicitly asked output to stop.
             _filter_thinking(index, "", final=True)
         thinking_direct.clear()
+        thinking_direct_chunkers.clear()
         for writer in termflow_writers.values():
             writer.abort()
         termflow_writers.clear()
@@ -532,6 +539,11 @@ async def event_stream_handler(
                         if smoother is not None:
                             await smoother.close()
                         thinking_direct.discard(event.index)
+                        chunker = thinking_direct_chunkers.pop(event.index, None)
+                        if chunker is not None:
+                            leftover = chunker.flush()
+                            if leftover:
+                                console.print(f"[dim]{escape(leftover)}[/dim]", end="")
                         if event.index in banner_printed:
                             console.print()  # Final newline after streaming
 
@@ -565,6 +577,11 @@ async def event_stream_handler(
         await smoother.close()
     thinking_smoothers.clear()
     thinking_direct.clear()
+    for index, chunker in list(thinking_direct_chunkers.items()):
+        leftover = chunker.flush()
+        if leftover:
+            console.print(f"[dim]{escape(leftover)}[/dim]", end="")
+    thinking_direct_chunkers.clear()
     for writer in list(termflow_writers.values()):
         await writer.close()
     termflow_writers.clear()

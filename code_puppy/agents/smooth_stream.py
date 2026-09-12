@@ -36,6 +36,35 @@ def _pause_controller_is_paused() -> bool:
         return False
 
 
+class WordSafeChunker:
+    """Buffers streamed text so a word never prints split across two calls."""
+
+    _MAX_CARRY = 40  # give up waiting for whitespace after this many chars
+
+    def __init__(self) -> None:
+        self._carry = ""
+
+    def push(self, chunk: str) -> str:
+        """Return the safe-to-print prefix of carry+chunk; buffer the rest."""
+        text = self._carry + chunk
+        cut = len(text)
+        while cut > 0 and not text[cut - 1].isspace():
+            cut -= 1
+        if cut == 0 and len(text) > self._MAX_CARRY:
+            cut = len(text)
+        safe, self._carry = text[:cut], text[cut:]
+        return safe
+
+    def flush(self) -> str:
+        """Return and clear whatever is still held back (stream ended)."""
+        safe, self._carry = self._carry, ""
+        return safe
+
+    def discard(self) -> None:
+        """Drop held-back content without printing it (abort/interrupt)."""
+        self._carry = ""
+
+
 class ThinkingStreamSmoother(StreamSmoother):
     """Buffer THINKING deltas and print them at a consistent rate."""
 
@@ -57,9 +86,24 @@ class ThinkingStreamSmoother(StreamSmoother):
         )
         self._console = console
         self._style = style
+        self._chunker = WordSafeChunker()
+
+    def _print(self, text: str) -> None:
+        if text:
+            self._console.print(f"[{self._style}]{escape(text)}[/{self._style}]", end="")
 
     def _emit_styled(self, chunk: str) -> None:
-        self._console.print(f"[{self._style}]{escape(chunk)}[/{self._style}]", end="")
+        self._print(self._chunker.push(chunk))
+
+    async def close(self) -> None:
+        """Drain as usual, then flush any word held back mid-stream."""
+        await super().close()
+        self._print(self._chunker.flush())
+
+    def abort(self) -> None:
+        """User interrupt: drop the held-back word too, print nothing."""
+        self._chunker.discard()
+        super().abort()
 
 
 class SmoothTermflowWriter(SmoothWriter):
