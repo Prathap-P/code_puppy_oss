@@ -264,6 +264,52 @@ class TestEventStreamHandler:
         assert console.print.called
 
     @pytest.mark.asyncio
+    async def test_thinking_deltas_never_split_a_word_direct_path(self, mock_ctx):
+        """A word must never be torn apart in the non-smoothed fallback path."""
+        thinking_part = ThinkingPart(content="")
+        start_event = PartStartEvent(index=0, part=thinking_part)
+        text = "The user's explicit statement is clear enough to proceed."
+        # Simulate bursty, arbitrary-boundary LLM token deltas.
+        pieces = [text[i : i + 3] for i in range(0, len(text), 3)]
+        delta_events = [
+            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=p))
+            for p in pieces
+        ]
+        end_event = PartEndEvent(index=0, part=thinking_part, next_part_kind=None)
+
+        async def event_stream():
+            yield start_event
+            for e in delta_events:
+                yield e
+            yield end_event
+
+        console = MagicMock(spec=Console)
+        set_streaming_console(console)
+
+        with patch(
+            "code_puppy.agents.event_stream_handler.get_banner_color",
+            return_value="blue",
+        ):
+            # Force the non-smoothed direct-print fallback deterministically.
+            with patch(
+                "code_puppy.agents.event_stream_handler.make_thinking_smoother",
+                return_value=None,
+            ):
+                await event_stream_handler(mock_ctx, event_stream())
+
+        dim_writes = [
+            call.args[0].removeprefix("[dim]").removesuffix("[/dim]")
+            for call in console.print.call_args_list
+            if call.args
+            and isinstance(call.args[0], str)
+            and call.args[0].startswith("[dim]")
+            and call.args[0].endswith("[/dim]")
+        ]
+        assert "".join(dim_writes) == text
+        for w in dim_writes[:-1]:
+            assert w[-1].isspace(), dim_writes
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "delta_content",
         [
